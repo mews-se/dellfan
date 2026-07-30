@@ -1,13 +1,15 @@
 [Unit]
 Description=Temperature-based fan control for buggy Dells
+After=systemd-modules-load.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 Restart=always
+RestartSec=5
 ExecStart=/usr/local/bin/tempcontrol.sh
-WorkingDirectory=/usr/local/bin
-StandardOutput=syslog
-StandardError=syslog
+# Failsafe: if the script dies without running its own exit trap, max the fans.
+ExecStopPost=/usr/bin/i8kfan 2 2
 SyslogIdentifier=tempcontrol
 
 [Install]
