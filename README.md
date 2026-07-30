@@ -33,6 +33,11 @@ systemctl start tempcontrol.service
 Check status with ```systemctl status tempcontrol.service```
 Check sensors to make sure that fan speed and temperature is showing correctly
 
+Notes:
+- The script finds the ```coretemp``` hwmon device by name, so there is no sensor path to edit.
+- As a failsafe, both fans are set to max whenever the script exits (including ```systemctl stop```), so the machine is never left without cooling.
+- Thresholds and poll interval are variables at the top of ```tempcontrol.sh```.
+
 OPTIONAL: To also disable Dell's bios fan control use [this](https://github.com/mews-se/dell-bios-fan-control)
 
 Credits: [Tom Freudenberg](https://github.com/TomFreudenberg), [Ronny Svedman](https://github.com/RonnySvedman)
