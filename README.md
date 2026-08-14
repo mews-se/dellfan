@@ -3,6 +3,7 @@
 [![ShellCheck](https://github.com/mews-se/dell-optiplex-temp-control/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/mews-se/dell-optiplex-temp-control/actions/workflows/shellcheck.yml)
 ![Shell: Bash](https://img.shields.io/badge/shell-bash-4EAA25.svg?logo=gnubash&logoColor=white)
 ![Platform: Debian](https://img.shields.io/badge/platform-Debian%20%2F%20DietPi%20%2F%20Proxmox-A81D33.svg?logo=debian&logoColor=white)
+![Hardware: Dell OptiPlex](https://img.shields.io/badge/hardware-Dell%20OptiPlex-007DB8.svg?logo=dell&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Helper: GPL-2.0](https://img.shields.io/badge/helper-GPL--2.0-orange.svg)](helper/dell-bios-fan-control.c)
 
