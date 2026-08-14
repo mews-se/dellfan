@@ -1,8 +1,12 @@
 # Dell Optiplex temperature and fan control
 
 [![ShellCheck](https://github.com/mews-se/dell-optiplex-temp-control/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/mews-se/dell-optiplex-temp-control/actions/workflows/shellcheck.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Helper: GPL-2.0](https://img.shields.io/badge/helper-GPL--2.0-orange.svg)](helper/dell-bios-fan-control.c)
 
 Fan control on Dell OptiPlex desktops is a mess. Depending on model and kernel version the machine may expose pwm files, only the old ```/proc/i8k``` interface, or nothing at all, and the BIOS keeps overriding whatever you set. dellfan works out what your machine actually supports and sets up the matching method, instead of you guessing your way through the manual recipes at the bottom.
+
+This is a full rebuild of what used to be a couple of manual recipes. The tooling is new, the shell code has been gone through and tested from scratch on real machines, and the old recipes are kept at the bottom for reference.
 
 ## dellfan
 
