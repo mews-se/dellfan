@@ -89,7 +89,7 @@ cmd_detect() {
     if [ -n "$HW" ]; then
         echo "dell_smm:    $HW, fan at $(rpm_now || echo '?') rpm"
     else
-        echo "dell_smm:    no hwmon device - try: modprobe dell-smm-hwmon ignore_dmi=1"
+        echo "dell_smm:    no hwmon device - install can configure the module"
     fi
     echo "pwm1:        ${PWM:-none}"
     echo "pwm1_enable: ${PWM_ENABLE:-none}"
@@ -113,6 +113,10 @@ cmd_detect() {
     fi
     if [ "$FC" = active ] && [ "$TC" = active ]; then
         echo "note: fancontrol and tempcontrol are both active - pick one"
+    fi
+    if ! fancontrol_hwmon_ok; then
+        echo "note: /etc/fancontrol points at another hwmon than dell_smm (${HW##*/})"
+        echo "      fancontrol will refuse to start - rerun install to rewrite it"
     fi
 
     case $TRACK in
@@ -253,6 +257,54 @@ cmd_probe() {
     probe_restore
 }
 
+# virgin machine: no dell_smm hwmon. configure the module persistently and load it.
+prepare_module() {
+    confirm "no dell_smm device - configure and load the kernel module now?" || return 1
+    printf 'options dell-smm-hwmon restricted=0 ignore_dmi=1\n' > /etc/modprobe.d/dellfan.conf
+    printf 'coretemp\ndell-smm-hwmon\n' > /etc/modules-load.d/dellfan.conf
+    modprobe coretemp 2> /dev/null || true
+    modprobe dell-smm-hwmon 2> /dev/null || true
+    sleep 1
+    gather
+    if [ -z "$HW" ]; then
+        # some BIOS/kernel combinations need the bigger hammer
+        modprobe -r dell-smm-hwmon 2> /dev/null || true
+        printf 'options dell-smm-hwmon restricted=0 force=1\n' > /etc/modprobe.d/dellfan.conf
+        modprobe dell-smm-hwmon 2> /dev/null || true
+        sleep 1
+        gather
+    fi
+    if [ -z "$HW" ]; then
+        rm -f /etc/modprobe.d/dellfan.conf /etc/modules-load.d/dellfan.conf
+        die "dell-smm-hwmon would not give a hwmon device - not a supported machine?"
+    fi
+    echo "dell_smm loaded, module configured persistently"
+}
+
+# hwmon numbering shifts between boots, and /etc/fancontrol pins a number
+fancontrol_hwmon_ok() {
+    [ -f /etc/fancontrol ] || return 0
+    [ -n "$HW" ] || return 0
+    grep -q "DEVNAME=${HW##*/}=dell_smm" /etc/fancontrol
+}
+
+write_fancontrol_config() {
+    local hw=${HW##*/}
+    cat > /etc/fancontrol <<EOF
+# written by dellfan, same shape as pwmconfig output
+INTERVAL=1
+DEVPATH=$hw=devices/platform/dell_smm_hwmon
+DEVNAME=$hw=dell_smm
+FCTEMPS=$hw/pwm1=$hw/temp1_input
+FCFANS=$hw/pwm1=$hw/fan1_input
+MAXTEMP=$hw/pwm1=50
+MINTEMP=$hw/pwm1=40
+MINSTART=$hw/pwm1=150
+MINSTOP=$hw/pwm1=0
+EOF
+    echo "wrote /etc/fancontrol"
+}
+
 install_helper_bin() {
     [ -f "$HELPER_SRC" ] || die "helper source missing at $HELPER_SRC"
     command -v cc > /dev/null || die "no C compiler - install gcc first"
@@ -288,7 +340,19 @@ fi"
 
 install_fancontrol() {
     [ -n "$PWM" ] || die "no pwm1 - this track needs the pwm interface"
-    [ -f /etc/fancontrol ] || die "no /etc/fancontrol - run pwmconfig once first"
+    if [ ! -f /etc/fancontrol ]; then
+        if confirm "no /etc/fancontrol - write a basic one (ramp 40-50 C on the dell_smm fan)?"; then
+            write_fancontrol_config
+        else
+            die "run pwmconfig once first, then rerun install"
+        fi
+    elif ! fancontrol_hwmon_ok; then
+        if confirm "/etc/fancontrol points at the wrong hwmon - rewrite it (custom tuning is lost)?"; then
+            write_fancontrol_config
+        else
+            die "fix /etc/fancontrol by hand or rerun pwmconfig first"
+        fi
+    fi
     if [ "$TC" = active ]; then
         if confirm "tempcontrol is active and would fight fancontrol - disable it?"; then
             systemctl disable --now tempcontrol
@@ -356,6 +420,9 @@ EOF
 
 cmd_install() {
     gather
+    if [ -z "$HW" ]; then
+        prepare_module || { echo "nothing installed"; return 0; }
+    fi
     echo "detected track: $TRACK"
     echo "1) plain fancontrol (whitelisted kernel)"
     echo "2) fancontrol + SMM helper drop-in"
@@ -430,6 +497,7 @@ cmd_status() {
     [ -f "$TC_DROPIN" ] && echo "drop-in:     $TC_DROPIN"
     [ -f "$TC_UNIT" ] && echo "unit:        $TC_UNIT"
     [ -f "$ALIAS_FILE" ] && echo "aliases:     $ALIAS_FILE"
+    [ -f /etc/modprobe.d/dellfan.conf ] && echo "module conf: /etc/modprobe.d/dellfan.conf"
     echo "services:    fancontrol=$FC tempcontrol=$TC i8kmon=$I8KMON"
     if [ -n "$HW" ]; then
         local p e
@@ -475,9 +543,17 @@ cmd_uninstall() {
         rm -f /usr/local/bin/dellfan
         echo "removed /usr/local/bin/dellfan"
     fi
+    if [ -f /etc/modprobe.d/dellfan.conf ] || [ -f /etc/modules-load.d/dellfan.conf ]; then
+        rm -f /etc/modprobe.d/dellfan.conf /etc/modules-load.d/dellfan.conf
+        echo "removed module config (module left loaded)"
+    fi
+    if [ -f /etc/fancontrol ] && head -1 /etc/fancontrol | grep -q "written by dellfan"; then
+        rm -f /etc/fancontrol
+        echo "removed generated /etc/fancontrol"
+    fi
     if [ -n "$changed" ]; then
         systemctl daemon-reload
-        if [ "$FC" = active ]; then
+        if [ "$FC" = active ] && [ -f /etc/fancontrol ]; then
             systemctl restart fancontrol
         fi
     fi
