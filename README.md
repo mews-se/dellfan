@@ -49,7 +49,13 @@ The recipes dellfan automates. Still valid if you want to do it by hand.
 ## The i8k route
 
 ```
-apt install i8kutils lm-sensors acpi
+apt install i8kutils lm-sensors
+```
+
+i8kutils is built for laptops and enables i8kmon, which just crash loops on a desktop looking for a battery - turn it off:
+
+```
+systemctl disable --now i8kmon
 ```
 
 edit ```/etc/modules``` to contain:
@@ -61,8 +67,10 @@ dell-smm-hwmon
 
 edit ```/etc/modprobe.d/i8k.conf``` to contain:
 ```
-options i8k force=1
+options i8k ignore_dmi=1
 ```
+
+force=1 also works but skips the SMM signature check and taints the kernel, so save it for when ignore_dmi is not enough. Watch out: i8kutils may ship its own /etc/modprobe.d/dell-smm-hwmon.conf with force=1.
 
 reboot
 
@@ -88,11 +96,15 @@ Credits: [Tom Freudenberg](https://github.com/TomFreudenberg), [Ronny Svedman](h
 
 Keep ```/etc/modules``` as above
 
-Don't use the i8k config but instead add this to /etc/modprobe.d/dell-smm-hwmon
+```
+apt install fancontrol
+```
+
+Don't use the i8k config but instead add this to /etc/modprobe.d/dell-smm-hwmon.conf (the .conf suffix matters, modprobe ignores the file without it)
 ```
 options dell-smm-hwmon ignore_dmi=1
 ```
 
-Run ```sensors-detect``` and then ```pwmconfig``` and if you're lucky you have a functioning fancontrol
-
 Reboot
+
+Run ```sensors-detect``` and then ```pwmconfig``` and if you're lucky you have a functioning fancontrol. On kernels that expose pwm1 but no pwm1_enable, pwmconfig refuses even though fancontrol itself works fine - dellfan writes the config for you in that case.
