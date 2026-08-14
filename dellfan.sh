@@ -267,12 +267,21 @@ prepare_module() {
     sleep 1
     gather
     if [ -z "$HW" ]; then
-        # some BIOS/kernel combinations need the bigger hammer
+        # ignore_dmi only skips the model list, the EC must still answer the Dell
+        # SMM signature. force skips that too, plus the BIOS-bug blacklists, and
+        # taints the kernel - last resort.
         modprobe -r dell-smm-hwmon 2> /dev/null || true
         printf 'options dell-smm-hwmon restricted=0 force=1\n' > /etc/modprobe.d/dellfan.conf
         modprobe dell-smm-hwmon 2> /dev/null || true
         sleep 1
         gather
+        if [ -n "$HW" ]; then
+            echo "note: needed force=1 - the EC never answered the Dell SMM signature,"
+            echo "      readings may be garbage and SMM calls can stall the machine. run probe."
+            if [ -z "$(rpm_now)" ]; then
+                echo "warning: no fan reading either - do not trust this device"
+            fi
+        fi
     fi
     if [ -z "$HW" ]; then
         rm -f /etc/modprobe.d/dellfan.conf /etc/modules-load.d/dellfan.conf
