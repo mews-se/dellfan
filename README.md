@@ -1,6 +1,6 @@
 # Dell Optiplex temperature and fan control
 
-[![ShellCheck](https://github.com/mews-se/dell-optiplex-temp-control/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/mews-se/dell-optiplex-temp-control/actions/workflows/shellcheck.yml)
+[![ShellCheck](https://github.com/mews-se/dellfan/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/mews-se/dellfan/actions/workflows/shellcheck.yml)
 ![Shell: Bash](https://img.shields.io/badge/shell-bash-4EAA25.svg?logo=gnubash&logoColor=white)
 ![Platform: Debian based](https://img.shields.io/badge/platform-Debian%20based-A81D33.svg?logo=debian&logoColor=white)
 ![Hardware: Dell OptiPlex](https://img.shields.io/badge/hardware-Dell%20OptiPlex-007DB8.svg?logo=dell&logoColor=white)
