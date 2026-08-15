@@ -34,7 +34,7 @@ sudo ./dellfan.sh auto       # back to automatic control
 
 The methods it picks between: if the kernel driver whitelists your model it can really turn the BIOS fan control off, so plain fancontrol is enough. If there are pwm files but no whitelist entry, fancontrol works until the EC re-arms itself, so dellfan adds a systemd drop-in that disables the BIOS control with the bundled SMM helper every time fancontrol starts. If there is only ```/proc/i8k```, it installs tempcontrol.service from this repo. If none of that exists it leaves the EC alone and tells you.
 
-install asks for the control temperatures (fan start and full speed, default 40 and 50 C) and keeps them in ```/etc/dellfan.conf```, where both methods read them. ```temps``` changes them later without a reinstall.
+install asks for the control temperatures (fan start and full speed, default 40 and 50 C) and keeps them in ```/etc/dellfan.conf```, where both methods read them. ```temps``` changes them later without a reinstall. Missing packages for the chosen method (fancontrol, lm-sensors, i8kutils) are offered for install through apt.
 
 On a machine the driver does not officially support, install offers to configure and load the module itself. It tries ```ignore_dmi=1``` first, which only skips the model list - the EC still has to answer Dell's SMM signature, so it cannot load on the wrong hardware. Only if that fails does it fall back to ```force=1```, which skips the signature check and the BIOS-bug blacklists too and taints the kernel, so dellfan warns loudly and tells you to probe before trusting anything.
 

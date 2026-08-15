@@ -360,6 +360,21 @@ install_helper_bin() {
     echo "built $HELPER_BIN"
 }
 
+pkg_ok() {
+    [ "$(dpkg-query -W -f='${db:Status-Abbrev}' "$1" 2>/dev/null)" = "ii " ]
+}
+
+ensure_pkgs() {
+    local p missing=""
+    for p in "$@"; do
+        pkg_ok "$p" || missing="$missing $p"
+    done
+    [ -n "$missing" ] || return 0
+    confirm "this track needs$missing - install with apt?" || die "missing packages:$missing"
+    # shellcheck disable=SC2086
+    apt-get install -y $missing || die "apt-get failed - run apt update and retry"
+}
+
 install_self() {
     install -m 755 "$SELF" /usr/local/bin/dellfan
     echo "installed /usr/local/bin/dellfan"
@@ -388,6 +403,7 @@ fi"
 
 install_fancontrol() {
     [ -n "$PWM" ] || die "no pwm1 - this track needs the pwm interface"
+    ensure_pkgs fancontrol lm-sensors
     if [ ! -f /etc/fancontrol ]; then
         if confirm "no /etc/fancontrol - write a basic one (ramp 40-50 C on the dell_smm fan)?"; then
             write_fancontrol_config
@@ -437,8 +453,14 @@ EOF
 }
 
 install_tempcontrol() {
+    ensure_pkgs i8kutils lm-sensors
+    I8KFAN=$(command -v i8kfan || true)
     [ -n "$I8KFAN" ] || die "i8kfan missing - apt install i8kutils"
     [ -n "$I8K" ] || die "no /proc/i8k - see the manual setup section in the README"
+    if systemctl is-enabled i8kmon > /dev/null 2>&1; then
+        systemctl disable --now i8kmon
+        echo "disabled i8kmon (laptop tool, crash loops on desktops)"
+    fi
     if [ "$FC" = active ]; then
         if confirm "fancontrol is active and would fight tempcontrol - disable it?"; then
             systemctl disable --now fancontrol
