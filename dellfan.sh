@@ -16,6 +16,7 @@ TC_DROPIN=/etc/systemd/system/tempcontrol.service.d/dellfan.conf
 TC_SCRIPT=/usr/local/bin/tempcontrol.sh
 TC_UNIT=/etc/systemd/system/tempcontrol.service
 ALIAS_FILE=/etc/profile.d/dellfan-aliases.sh
+CONF_FILE=/etc/dellfan.conf
 WL_MSG="Enabling support for setting automatic/manual fan control"
 
 RESTART=""
@@ -43,6 +44,44 @@ smm_dir() {
 
 rpm_now() {
     [ -n "$HW" ] && cat "$HW/fan1_input" 2>/dev/null
+}
+
+fancontrol_temp() {
+    sed -n -E "s|^$1=[^=]+=([0-9]+)\$|\1|p" /etc/fancontrol 2>/dev/null | head -1
+}
+
+# the conf file wins, an existing /etc/fancontrol seeds it, defaults last
+load_temps() {
+    LOW=40
+    HIGH=50
+    if [ -r "$CONF_FILE" ]; then
+        # shellcheck source=/dev/null
+        . "$CONF_FILE"
+    elif [ -f /etc/fancontrol ]; then
+        local lo hi
+        lo=$(fancontrol_temp MINTEMP)
+        hi=$(fancontrol_temp MAXTEMP)
+        [ -n "$lo" ] && LOW=$lo
+        [ -n "$hi" ] && HIGH=$hi
+    fi
+}
+
+write_temps_conf() {
+    cat > "$CONF_FILE" <<EOF
+# written by dellfan - the fan starts at LOW C and runs full from HIGH C
+LOW=$LOW
+HIGH=$HIGH
+EOF
+}
+
+valid_temps() {
+    case "$1$2" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$1" -ge 20 ] && [ "$2" -le 90 ] && [ "$1" -lt "$2" ]
+}
+
+apply_temps_fancontrol() {
+    [ -f /etc/fancontrol ] || return 0
+    sed -i -E "s|^(MINTEMP=[^=]+=)[0-9]+\$|\1$LOW|; s|^(MAXTEMP=[^=]+=)[0-9]+\$|\1$HIGH|" /etc/fancontrol
 }
 
 gather() {
@@ -306,8 +345,8 @@ DEVPATH=$hw=devices/platform/dell_smm_hwmon
 DEVNAME=$hw=dell_smm
 FCTEMPS=$hw/pwm1=$hw/temp1_input
 FCFANS=$hw/pwm1=$hw/fan1_input
-MAXTEMP=$hw/pwm1=50
-MINTEMP=$hw/pwm1=40
+MAXTEMP=$hw/pwm1=$HIGH
+MINTEMP=$hw/pwm1=$LOW
 MINSTART=$hw/pwm1=150
 MINSTOP=$hw/pwm1=0
 EOF
@@ -362,6 +401,8 @@ install_fancontrol() {
             die "fix /etc/fancontrol by hand or rerun pwmconfig first"
         fi
     fi
+    write_temps_conf
+    apply_temps_fancontrol
     if [ "$TC" = active ]; then
         if confirm "tempcontrol is active and would fight fancontrol - disable it?"; then
             systemctl disable --now tempcontrol
@@ -405,6 +446,7 @@ install_tempcontrol() {
     fi
     install -m 755 "$SRC_DIR/tempcontrol.sh" "$TC_SCRIPT"
     install -m 644 "$SRC_DIR/tempcontrol.service" "$TC_UNIT"
+    write_temps_conf
     if [ "$1" = helper ]; then
         install_helper_bin
         mkdir -p "$(dirname "$TC_DROPIN")"
@@ -446,12 +488,28 @@ cmd_install() {
     read -r -p "pick a track [${def:-none}]: " c < /dev/tty
     c=${c:-$def}
     case $c in
+        1|2|3|4) ask_temps ;;
+    esac
+    case $c in
         1) install_fancontrol plain ;;
         2) install_fancontrol helper ;;
         3) install_tempcontrol plain ;;
         4) install_tempcontrol helper ;;
         *) echo "nothing installed" ;;
     esac
+}
+
+ask_temps() {
+    local t
+    load_temps
+    read -r -p "fan start / full speed temperatures in C [$LOW $HIGH]: " t < /dev/tty
+    if [ -n "$t" ]; then
+        # shellcheck disable=SC2086
+        set -- $t
+        valid_temps "${1:-}" "${2:-}" || die "give two numbers, low then high, within 20-90 C"
+        LOW=$1
+        HIGH=$2
+    fi
 }
 
 # fanoff: stop the daemon and command max explicitly. history independent -
@@ -495,12 +553,41 @@ cmd_auto() {
     fi
 }
 
+cmd_temps() {
+    gather
+    load_temps
+    if [ $# -eq 0 ]; then
+        echo "fan starts at $LOW C, runs full from $HIGH C"
+        if [ -f "$CONF_FILE" ]; then
+            echo "set in $CONF_FILE - change with: dellfan temps <low> <high>"
+        else
+            echo "no $CONF_FILE yet - set one with: dellfan temps <low> <high>"
+        fi
+        return 0
+    fi
+    [ $# -eq 2 ] || die "usage: dellfan temps [<low> <high>]"
+    valid_temps "$1" "$2" || die "give two numbers, low then high, within 20-90 C"
+    LOW=$1
+    HIGH=$2
+    write_temps_conf
+    apply_temps_fancontrol
+    [ "$FC" = active ] && systemctl restart fancontrol
+    [ "$TC" = active ] && systemctl restart tempcontrol
+    echo "fan starts at $LOW C, runs full from $HIGH C"
+}
+
 cmd_status() {
     gather
+    load_temps
     if [ -x "$HELPER_BIN" ]; then
         echo "helper:      $HELPER_BIN"
     else
         echo "helper:      not installed"
+    fi
+    if [ -f "$CONF_FILE" ]; then
+        echo "temps:       fan from $LOW C, full from $HIGH C ($CONF_FILE)"
+    else
+        echo "temps:       fan from $LOW C, full from $HIGH C (defaults)"
     fi
     [ -f "$FC_DROPIN" ] && echo "drop-in:     $FC_DROPIN"
     [ -f "$TC_DROPIN" ] && echo "drop-in:     $TC_DROPIN"
@@ -548,6 +635,10 @@ cmd_uninstall() {
         rm -f "$ALIAS_FILE"
         echo "removed $ALIAS_FILE"
     fi
+    if [ -f "$CONF_FILE" ]; then
+        rm -f "$CONF_FILE"
+        echo "removed $CONF_FILE"
+    fi
     if [ -f /usr/local/bin/dellfan ]; then
         rm -f /usr/local/bin/dellfan
         echo "removed /usr/local/bin/dellfan"
@@ -568,25 +659,37 @@ cmd_uninstall() {
     fi
 }
 
+menu_temps() {
+    local t
+    cmd_temps
+    read -r -p "new values, low then high (enter keeps current): " t < /dev/tty
+    if [ -n "$t" ]; then
+        # shellcheck disable=SC2086
+        cmd_temps $t
+    fi
+}
+
 cmd_menu() {
     local c
     while :; do
         echo
-        echo "dellfan: 1 detect  2 probe  3 install  4 status  5 uninstall  q quit"
+        echo "dellfan: 1 detect  2 probe  3 install  4 status  5 temps  6 uninstall  q quit"
         read -r -p "> " c < /dev/tty
         case $c in
             1) cmd_detect ;;
             2) cmd_probe ;;
             3) cmd_install ;;
             4) cmd_status ;;
-            5) cmd_uninstall ;;
+            5) menu_temps ;;
+            6) cmd_uninstall ;;
             q|Q) return 0 ;;
         esac
     done
 }
 
 usage() {
-    echo "usage: ${0##*/} [detect|probe|install|status|uninstall|max|auto]"
+    echo "usage: ${0##*/} [detect|probe|install|status|temps|uninstall|max|auto]"
+    echo "temps shows the control temperatures, temps <low> <high> sets them"
     echo "run without arguments for a menu"
 }
 
@@ -603,6 +706,7 @@ main() {
         probe) cmd_probe ;;
         install) cmd_install ;;
         status) cmd_status ;;
+        temps) shift; cmd_temps "$@" ;;
         uninstall) cmd_uninstall ;;
         max) cmd_max ;;
         auto) cmd_auto ;;

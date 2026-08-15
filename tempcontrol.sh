@@ -7,13 +7,20 @@
 SENSOR_NAME="coretemp"  # hwmon device name to read temperature from
 INTERVAL=2              # seconds between temperature checks
 
+# Control temperatures in C: the fan starts at LOW, runs full from HIGH.
+# dellfan temps writes /etc/dellfan.conf; without it the defaults apply.
+LOW=40
+HIGH=50
+# shellcheck source=/dev/null
+[ -r /etc/dellfan.conf ] && . /etc/dellfan.conf
+
 # Thresholds in millidegrees Celsius. Separate up/down limits (hysteresis)
 # keep the fan from toggling back and forth when the temperature hovers
 # right at a threshold.
-LEVEL1_UP=40000    # switch 0 -> 1 at or above this
-LEVEL1_DOWN=37000  # switch 1 -> 0 below this
-LEVEL2_UP=45000    # switch 1 -> 2 at or above this
-LEVEL2_DOWN=42000  # switch 2 -> 1 below this
+LEVEL1_UP=$((LOW * 1000))
+LEVEL1_DOWN=$(((LOW - 3) * 1000))
+LEVEL2_UP=$((HIGH * 1000))
+LEVEL2_DOWN=$(((HIGH - 3) * 1000))
 
 # Failsafe: never leave the machine without cooling. Whatever makes this
 # script exit (sensor error, systemctl stop, crash), set both fans to max.

@@ -26,12 +26,15 @@ sudo ./dellfan.sh detect     # read-only report: model, driver state, which meth
 sudo ./dellfan.sh probe      # optional write test: confirms the fan really answers, restores everything
 sudo ./dellfan.sh install    # set up the recommended method
 sudo ./dellfan.sh status     # what is installed and running
+sudo ./dellfan.sh temps      # show the control temperatures; temps 43 57 sets them
 sudo ./dellfan.sh uninstall  # remove everything dellfan installed
 sudo ./dellfan.sh max        # stop the fan daemon and run the fan at max
 sudo ./dellfan.sh auto       # back to automatic control
 ```
 
 The methods it picks between: if the kernel driver whitelists your model it can really turn the BIOS fan control off, so plain fancontrol is enough. If there are pwm files but no whitelist entry, fancontrol works until the EC re-arms itself, so dellfan adds a systemd drop-in that disables the BIOS control with the bundled SMM helper every time fancontrol starts. If there is only ```/proc/i8k```, it installs tempcontrol.service from this repo. If none of that exists it leaves the EC alone and tells you.
+
+install asks for the control temperatures (fan start and full speed, default 40 and 50 C) and keeps them in ```/etc/dellfan.conf```, where both methods read them. ```temps``` changes them later without a reinstall.
 
 On a machine the driver does not officially support, install offers to configure and load the module itself. It tries ```ignore_dmi=1``` first, which only skips the model list - the EC still has to answer Dell's SMM signature, so it cannot load on the wrong hardware. Only if that fails does it fall back to ```force=1```, which skips the signature check and the BIOS-bug blacklists too and taints the kernel, so dellfan warns loudly and tells you to probe before trusting anything.
 
@@ -91,7 +94,7 @@ Check sensors to make sure that fan speed and temperature is showing correctly
 Notes:
 - The script finds the ```coretemp``` hwmon device by name, so there is no sensor path to edit.
 - As a failsafe, both fans are set to max whenever the script exits (including ```systemctl stop```), so the machine is never left without cooling.
-- Thresholds and poll interval are variables at the top of ```tempcontrol.sh```.
+- The control temperatures come from ```/etc/dellfan.conf``` (set with ```dellfan temps```); without that file the defaults at the top of ```tempcontrol.sh``` apply. The poll interval is a variable at the top of the script.
 
 Credits: [Tom Freudenberg](https://github.com/TomFreudenberg), [Ronny Svedman](https://github.com/RonnySvedman)
 
