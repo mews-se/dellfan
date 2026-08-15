@@ -42,7 +42,7 @@ The fancontrol drop-in also has a failsafe: anything that stops fancontrol, incl
 
 detect also flags leftovers from earlier attempts, like i8kmon crash looping on a desktop (it is a laptop tool that dies looking for a battery), or two fan daemons fighting over the same fan.
 
-install ends by offering a few aliases: ```sen``` (watch sensors every second), ```fanmax``` and ```fanauto``` (the max and auto subcommands above, which do the same thing no matter which method is installed).
+install ends by offering a few aliases: ```sen``` (watch sensors every second), ```fanmax``` and ```fanauto``` (the max and auto subcommands above, which do the same thing no matter which method is installed). They go into ```~/.bash_aliases``` of the user who ran sudo, and each one is appended only if that alias is not already there, so a managed aliases file is respected.
 
 ## helper/
 

@@ -15,7 +15,6 @@ FC_DROPIN=/etc/systemd/system/fancontrol.service.d/dellfan.conf
 TC_DROPIN=/etc/systemd/system/tempcontrol.service.d/dellfan.conf
 TC_SCRIPT=/usr/local/bin/tempcontrol.sh
 TC_UNIT=/etc/systemd/system/tempcontrol.service
-ALIAS_FILE=/etc/profile.d/dellfan-aliases.sh
 CONF_FILE=/etc/dellfan.conf
 WL_MSG="Enabling support for setting automatic/manual fan control"
 
@@ -380,25 +379,21 @@ install_self() {
     echo "installed /usr/local/bin/dellfan"
 }
 
+# aliases go into ~/.bash_aliases of whoever ran sudo, appended only when
+# missing, so a dotfiles-managed file is left alone
 offer_aliases() {
-    local out=""
-    if confirm "add the sen alias (watch sensors every second)?"; then
-        out="alias sen='watch -n 1 sensors'"
-    fi
-    if confirm "add fanmax/fanauto aliases (fanmax = daemon off and max fan, fanauto = back to automatic)?"; then
-        out="$out
-if [ \"\$(id -u)\" = 0 ]; then
-    alias fanmax='dellfan max'
-    alias fanauto='dellfan auto'
-else
-    alias fanmax='sudo dellfan max'
-    alias fanauto='sudo dellfan auto'
-fi"
-    fi
-    if [ -n "$out" ]; then
-        printf '%s\n' "$out" > "$ALIAS_FILE"
-        echo "aliases written to $ALIAS_FILE - new login shells pick them up"
-    fi
+    local user=${SUDO_USER:-root} home file pfx=""
+    home=$(getent passwd "$user" | cut -d: -f6)
+    [ -n "$home" ] || return 0
+    file="$home/.bash_aliases"
+    [ "$user" = root ] || pfx="sudo "
+    confirm "add sen/fanmax/fanauto aliases to $file?" || return 0
+    touch "$file"
+    grep -q "^alias sen=" "$file" || echo "alias sen=\"watch -n 1 sensors\"" >> "$file"
+    grep -q "^alias fanmax=" "$file" || echo "alias fanmax=\"${pfx}dellfan max\"" >> "$file"
+    grep -q "^alias fanauto=" "$file" || echo "alias fanauto=\"${pfx}dellfan auto\"" >> "$file"
+    chown "$user": "$file" 2> /dev/null || true
+    echo "aliases in $file - new shells pick them up"
 }
 
 install_fancontrol() {
@@ -614,7 +609,6 @@ cmd_status() {
     [ -f "$FC_DROPIN" ] && echo "drop-in:     $FC_DROPIN"
     [ -f "$TC_DROPIN" ] && echo "drop-in:     $TC_DROPIN"
     [ -f "$TC_UNIT" ] && echo "unit:        $TC_UNIT"
-    [ -f "$ALIAS_FILE" ] && echo "aliases:     $ALIAS_FILE"
     [ -f /etc/modprobe.d/dellfan.conf ] && echo "module conf: /etc/modprobe.d/dellfan.conf"
     echo "services:    fancontrol=$FC tempcontrol=$TC i8kmon=$I8KMON"
     if [ -n "$HW" ]; then
@@ -653,9 +647,11 @@ cmd_uninstall() {
         rm -f "$HELPER_BIN"
         echo "BIOS control re-enabled, removed $HELPER_BIN"
     fi
-    if [ -f "$ALIAS_FILE" ]; then
-        rm -f "$ALIAS_FILE"
-        echo "removed $ALIAS_FILE"
+    local home
+    home=$(getent passwd "${SUDO_USER:-root}" | cut -d: -f6)
+    if [ -n "$home" ] && [ -f "$home/.bash_aliases" ] && grep -q "dellfan max\|dellfan auto" "$home/.bash_aliases"; then
+        sed -i '/^alias fanmax=.*dellfan max/d; /^alias fanauto=.*dellfan auto/d' "$home/.bash_aliases"
+        echo "removed the fanmax/fanauto aliases (sen left in place)"
     fi
     if [ -f "$CONF_FILE" ]; then
         rm -f "$CONF_FILE"
