@@ -565,8 +565,14 @@ cmd_auto() {
         fi
         if [ -n "$PWM_ENABLE" ]; then
             echo 2 > "$PWM_ENABLE" 2>/dev/null || true
+            echo "no fan daemon enabled - handed back to the EC"
+        else
+            # without pwm1_enable there is no auto handshake - the EC keeps
+            # the last manual level forever, so max is the only safe parking
+            fan_hi
+            echo "no fan daemon enabled and no pwm1_enable - the EC will not resume its curve"
+            echo "fan parked at max instead (a reboot brings back EC auto)"
         fi
-        echo "no fan daemon enabled - handed back to the EC"
     fi
 }
 
