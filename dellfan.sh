@@ -74,7 +74,8 @@ EOF
 }
 
 valid_temps() {
-    case "$1$2" in ''|*[!0-9]*) return 1 ;; esac
+    case "$1" in ''|*[!0-9]*) return 1 ;; esac
+    case "$2" in ''|*[!0-9]*) return 1 ;; esac
     [ "$1" -ge 20 ] && [ "$2" -le 90 ] && [ "$1" -lt "$2" ]
 }
 
@@ -194,6 +195,7 @@ find_helper() {
     fi
     if [ -f "$HELPER_SRC" ] && command -v cc > /dev/null; then
         TMP_HELPER=$(mktemp /tmp/dellfan.XXXXXX)
+        trap '[ -z "$TMP_HELPER" ] || rm -f "$TMP_HELPER"' EXIT
         if cc -O2 -o "$TMP_HELPER" "$HELPER_SRC" 2> /dev/null; then
             chmod 700 "$TMP_HELPER"
             HELPER_USE=$TMP_HELPER
@@ -240,14 +242,19 @@ probe_restore() {
         TMP_HELPER=""
     fi
     if [ -n "$RESTART" ]; then
-        systemctl start "$RESTART"
-        echo "$RESTART started again"
+        local s
+        for s in $RESTART; do
+            systemctl start "$s"
+            echo "$s started again"
+        done
     elif [ -n "$PWM_ENABLE" ]; then
         echo 2 > "$PWM_ENABLE" 2>/dev/null || true
         echo "fan handed back to the EC"
     else
-        fan_mid
-        echo "no fan daemon was running - fan left at the middle level, the EC curve still applies"
+        # same parking rule as cmd_auto: without the auto handshake the EC
+        # keeps the last manual level, so max is the only safe stop
+        fan_hi
+        echo "no fan daemon was running - fan parked at max (a reboot brings back EC auto)"
     fi
 }
 
@@ -268,7 +275,7 @@ cmd_probe() {
     fi
     if [ "$TC" = active ]; then
         systemctl stop tempcontrol
-        RESTART=tempcontrol
+        RESTART="$RESTART tempcontrol"
     fi
     sleep 1
     if [ -n "$PWM_ENABLE" ]; then
@@ -284,7 +291,10 @@ cmd_probe() {
     hi=$(rpm_now)
     echo "mid command -> $mid rpm, max command -> $hi rpm"
 
-    if [ "${hi:-0}" -gt $(( ${mid:-0} + 500 )) ]; then
+    if [ -z "${hi:-}" ] || [ -z "${mid:-}" ]; then
+        echo "no rpm reading from fan1_input - cannot judge the fan response"
+        probe_helper_toggle
+    elif [ "$hi" -gt $(( mid + 500 )) ]; then
         echo "manual control works right now"
         probe_helper_toggle
     else
@@ -375,6 +385,7 @@ ensure_pkgs() {
 }
 
 install_self() {
+    [ "$SELF" = /usr/local/bin/dellfan ] && return 0
     install -m 755 "$SELF" /usr/local/bin/dellfan
     echo "installed /usr/local/bin/dellfan"
 }
@@ -432,6 +443,8 @@ ExecStartPre=$HELPER_BIN 0
 ExecStopPost=/bin/sh -c 'for d in /sys/class/hwmon/hwmon*; do [ "\$\$(cat \$\$d/name)" = dell_smm ] && echo 255 > \$\$d/pwm1; done; exit 0'
 EOF
         echo "drop-in written: BIOS control off while fancontrol runs, max fan when it stops"
+    else
+        rm -f "$FC_DROPIN"
     fi
     systemctl daemon-reload
     systemctl enable fancontrol > /dev/null 2>&1 || true
@@ -440,7 +453,7 @@ EOF
         systemctl daemon-reload
         systemctl reset-failed fancontrol 2> /dev/null || true
         systemctl restart fancontrol || true
-        die "fancontrol would not start with the drop-in - reverted, see journalctl -u fancontrol"
+        die "fancontrol would not start - see journalctl -u fancontrol"
     fi
     echo "fancontrol running"
     install_self
@@ -461,8 +474,8 @@ install_tempcontrol() {
             systemctl disable --now fancontrol
         fi
     fi
-    install -m 755 "$SRC_DIR/tempcontrol.sh" "$TC_SCRIPT"
-    install -m 644 "$SRC_DIR/tempcontrol.service" "$TC_UNIT"
+    install -m 755 "$SRC_DIR/tempcontrol.sh" "$TC_SCRIPT" || die "tempcontrol.sh missing - run install from the repo clone"
+    install -m 644 "$SRC_DIR/tempcontrol.service" "$TC_UNIT" || die "tempcontrol.service missing - run install from the repo clone"
     write_temps_conf
     if [ "$1" = helper ]; then
         install_helper_bin
@@ -472,6 +485,8 @@ install_tempcontrol() {
 ExecStartPre=$HELPER_BIN 0
 EOF
         echo "drop-in written: BIOS control off while tempcontrol runs"
+    else
+        rm -f "$TC_DROPIN"
     fi
     systemctl daemon-reload
     systemctl enable tempcontrol > /dev/null 2>&1
@@ -560,6 +575,9 @@ cmd_auto() {
         systemctl start tempcontrol
         echo "tempcontrol running"
     else
+        if [ -z "$PWM" ] && [ -z "$I8KFAN" ]; then
+            die "no pwm1 and no i8kfan - cannot set the fan"
+        fi
         if [ -x "$HELPER_BIN" ]; then
             "$HELPER_BIN" 1 > /dev/null
         fi
@@ -672,8 +690,10 @@ cmd_uninstall() {
         echo "removed module config (module left loaded)"
     fi
     if [ -f /etc/fancontrol ] && head -1 /etc/fancontrol | grep -q "written by dellfan"; then
+        systemctl disable --now fancontrol 2> /dev/null || true
         rm -f /etc/fancontrol
-        echo "removed generated /etc/fancontrol"
+        changed=1
+        echo "disabled fancontrol and removed its generated /etc/fancontrol"
     fi
     if [ -n "$changed" ]; then
         systemctl daemon-reload

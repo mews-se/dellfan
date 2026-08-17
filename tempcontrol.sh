@@ -1,8 +1,7 @@
 #!/bin/bash
 
-# Bash script to control fan speed based on CPU temperature.
-# Finds the coretemp hwmon device automatically, uses hysteresis to avoid
-# fan oscillation, and only calls i8kfan when the fan level actually changes.
+# fan control from CPU temperature via i8kfan. hysteresis avoids
+# oscillation, and i8kfan is only called when the level actually changes.
 
 SENSOR_NAME="coretemp"  # hwmon device name to read temperature from
 INTERVAL=2              # seconds between temperature checks

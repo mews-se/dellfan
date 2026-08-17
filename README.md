@@ -1,4 +1,4 @@
-# Dell Optiplex temperature and fan control
+# Dell OptiPlex temperature and fan control
 
 [![ShellCheck](https://github.com/mews-se/dellfan/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/mews-se/dellfan/actions/workflows/shellcheck.yml)
 ![Shell: Bash](https://img.shields.io/badge/shell-bash-4EAA25.svg?logo=gnubash&logoColor=white)
@@ -98,7 +98,7 @@ Notes:
 
 Credits: [Tom Freudenberg](https://github.com/TomFreudenberg), [Ronny Svedman](https://github.com/RonnySvedman)
 
-## For some reason you can trick Fancontrol to work on some versions of the Optiplex family
+## For some reason you can trick Fancontrol to work on some versions of the OptiPlex family
 
 Keep ```/etc/modules``` as above
 
