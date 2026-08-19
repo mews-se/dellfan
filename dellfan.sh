@@ -11,6 +11,11 @@ SRC_DIR=$(cd "$(dirname "$0")" && pwd)
 SELF="$SRC_DIR/$(basename "$0")"
 HELPER_SRC="$SRC_DIR/helper/dell-bios-fan-control.c"
 HELPER_BIN=/usr/local/bin/dell-bios-fan-control
+# the helper's inline SMM asm pushes to the stack, so keep it out of the red zone
+case $(uname -m) in
+    x86_64) HELPER_CFLAGS=(-mno-red-zone) ;;
+    *)      HELPER_CFLAGS=() ;;
+esac
 FC_DROPIN=/etc/systemd/system/fancontrol.service.d/dellfan.conf
 TC_DROPIN=/etc/systemd/system/tempcontrol.service.d/dellfan.conf
 TC_SCRIPT=/usr/local/bin/tempcontrol.sh
@@ -196,7 +201,7 @@ find_helper() {
     if [ -f "$HELPER_SRC" ] && command -v cc > /dev/null; then
         TMP_HELPER=$(mktemp /tmp/dellfan.XXXXXX)
         trap '[ -z "$TMP_HELPER" ] || rm -f "$TMP_HELPER"' EXIT
-        if cc -O2 -o "$TMP_HELPER" "$HELPER_SRC" 2> /dev/null; then
+        if cc -O2 "${HELPER_CFLAGS[@]}" -o "$TMP_HELPER" "$HELPER_SRC" 2> /dev/null; then
             chmod 700 "$TMP_HELPER"
             HELPER_USE=$TMP_HELPER
             return 0
@@ -365,7 +370,7 @@ EOF
 install_helper_bin() {
     [ -f "$HELPER_SRC" ] || die "helper source missing at $HELPER_SRC"
     command -v cc > /dev/null || die "no C compiler - install gcc first"
-    cc -O2 -Wall -o "$HELPER_BIN" "$HELPER_SRC" || die "helper build failed"
+    cc -O2 -Wall "${HELPER_CFLAGS[@]}" -o "$HELPER_BIN" "$HELPER_SRC" || die "helper build failed"
     echo "built $HELPER_BIN"
 }
 
