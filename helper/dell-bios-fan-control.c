@@ -1,6 +1,6 @@
 /*
  * dell-bios-fan-control
- * user space utility to set control of fans by bios on Dell 9560 Laptops.
+ * user space utility to enable or disable BIOS fan control on Dell machines.
  *
  * SMM Management code from i8k. See file drivers/char/i8k.c at Linux kernel.
  *
@@ -27,6 +27,10 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/io.h>
+
+#if !defined(__x86_64__)
+#error "x86-64 only: the SMM call goes out through ports 0xb2 and 0x84"
+#endif
 
 /*
  *
@@ -131,18 +135,16 @@ int main(int argc, char **argv) {
 
     init_ioperm();
 
-    if (enable) {
+    if (enable)
         rc = send(ENABLE_BIOS_METHOD2, 0);
-        printf ("BIOS CONTROL ENABLED\n");
-    }
-    else {
+    else
         rc = send(DISABLE_BIOS_METHOD2, 0);
-        printf ("BIOS CONTROL DISABLED\n");
-    }
 
     /* The error heuristic can misfire on some BIOSes, so warn only */
     if (rc != 0)
         fprintf(stderr, "warning: SMM call may have failed\n");
+
+    printf ("BIOS CONTROL %s\n", enable ? "ENABLED" : "DISABLED");
 
     return 0;
 }
