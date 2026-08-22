@@ -22,15 +22,15 @@
  *
  */
 
+#if !defined(__x86_64__)
+#error "x86-64 only: the SMM call goes out through ports 0xb2 and 0x84"
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/io.h>
-
-#if !defined(__x86_64__)
-#error "x86-64 only: the SMM call goes out through ports 0xb2 and 0x84"
-#endif
 
 /*
  *
