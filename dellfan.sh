@@ -51,7 +51,7 @@ rpm_now() {
 }
 
 fancontrol_temp() {
-    sed -n -E "s|^$1=[^=]+=([0-9]+)\$|\1|p" /etc/fancontrol 2>/dev/null | head -1
+    sed -n -E "s|^$1=[^=]+=([0-9]+)( .*)?\$|\1|p" /etc/fancontrol 2>/dev/null | head -1
 }
 
 # the conf file wins, an existing /etc/fancontrol seeds it, defaults last
@@ -86,7 +86,7 @@ valid_temps() {
 
 apply_temps_fancontrol() {
     [ -f /etc/fancontrol ] || return 0
-    sed -i -E "s|^(MINTEMP=[^=]+=)[0-9]+\$|\1$LOW|; s|^(MAXTEMP=[^=]+=)[0-9]+\$|\1$HIGH|" /etc/fancontrol
+    sed -i -E "/^MINTEMP=/ s|([^ =]+/pwm[0-9]+=)[0-9]+|\1$LOW|g; /^MAXTEMP=/ s|([^ =]+/pwm[0-9]+=)[0-9]+|\1$HIGH|g" /etc/fancontrol
 }
 
 gather() {
