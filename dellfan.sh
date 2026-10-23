@@ -50,6 +50,12 @@ rpm_now() {
     [ -n "$HW" ] && cat "$HW/fan1_input" 2>/dev/null
 }
 
+# pwmN drives fanN
+fan_line() {
+    local n=${1##*pwm}
+    echo "${1##*/}=$(cat "$1" 2>/dev/null || echo '?'), $(cat "$HW/fan${n}_input" 2>/dev/null || echo '?') rpm ($(cat "$HW/fan${n}_label" 2>/dev/null || echo "fan$n"))"
+}
+
 fancontrol_temp() {
     sed -n -E "s|^$1=[^=]+=([0-9]+)( .*)?\$|\1|p" /etc/fancontrol 2>/dev/null | head -1
 }
@@ -93,10 +99,13 @@ gather() {
     MODEL=$(cat /sys/class/dmi/id/product_name 2>/dev/null || echo unknown)
     KERNEL=$(uname -r)
     HW=$(smm_dir) || HW=""
-    PWM=""
+    PWMS=()
     PWM_ENABLE=""
     if [ -n "$HW" ]; then
-        [ -e "$HW/pwm1" ] && PWM="$HW/pwm1"
+        local p
+        for p in "$HW"/pwm[1-4]; do
+            [ -e "$p" ] && PWMS+=("$p")
+        done
         [ -e "$HW/pwm1_enable" ] && PWM_ENABLE="$HW/pwm1_enable"
     fi
     WHITELISTED=""
@@ -112,9 +121,9 @@ gather() {
     TC=$(systemctl is-active tempcontrol 2>/dev/null)
     I8KMON=$(systemctl is-active i8kmon 2>/dev/null)
     TRACK=none
-    if [ -n "$WHITELISTED" ] && [ -n "$PWM" ]; then
+    if [ -n "$WHITELISTED" ] && [ -n "${PWMS[*]}" ]; then
         TRACK=fancontrol
-    elif [ -n "$PWM" ]; then
+    elif [ -n "${PWMS[*]}" ]; then
         TRACK=fancontrol-helper
     elif [ -n "$I8K" ] && [ -n "$I8KFAN" ]; then
         TRACK=tempcontrol
@@ -127,15 +136,21 @@ gather() {
 }
 
 cmd_detect() {
+    local p missing
     gather
     echo "model:       $MODEL"
     echo "kernel:      $KERNEL"
-    if [ -n "$HW" ]; then
+    if [ -z "$HW" ]; then
+        echo "dell_smm:    no hwmon device - install can configure the module"
+    elif [ -z "${PWMS[*]}" ]; then
         echo "dell_smm:    $HW, fan at $(rpm_now || echo '?') rpm"
     else
-        echo "dell_smm:    no hwmon device - install can configure the module"
+        echo "dell_smm:    $HW"
     fi
-    echo "pwm1:        ${PWM:-none}"
+    [ -n "${PWMS[*]}" ] || echo "pwm:         none"
+    for p in "${PWMS[@]}"; do
+        echo "pwm:         $(fan_line "$p")"
+    done
     echo "pwm1_enable: ${PWM_ENABLE:-none}"
     if [ -n "$WHITELISTED" ]; then
         echo "whitelisted: yes - the kernel can really toggle the BIOS fan control"
@@ -161,6 +176,12 @@ cmd_detect() {
     if ! fancontrol_hwmon_ok; then
         echo "note: /etc/fancontrol points at another hwmon than dell_smm (${HW##*/})"
         echo "      fancontrol will refuse to start - rerun install to rewrite it"
+    else
+        missing=$(fancontrol_missing)
+        if [ -n "$missing" ]; then
+            echo "note: /etc/fancontrol leaves out $missing - nothing drives that fan"
+            echo "      rerun install to rewrite it for every fan"
+        fi
     fi
 
     case $TRACK in
@@ -176,16 +197,22 @@ cmd_detect() {
 }
 
 fan_hi() {
-    if [ -n "$PWM" ]; then
-        echo 255 > "$PWM" 2>/dev/null || true
+    local p
+    if [ -n "${PWMS[*]}" ]; then
+        for p in "${PWMS[@]}"; do
+            echo 255 > "$p" 2>/dev/null || true
+        done
     else
         i8kfan - 2 > /dev/null 2>&1 || true
     fi
 }
 
 fan_mid() {
-    if [ -n "$PWM" ]; then
-        echo 128 > "$PWM" 2>/dev/null || true
+    local p
+    if [ -n "${PWMS[*]}" ]; then
+        for p in "${PWMS[@]}"; do
+            echo 128 > "$p" 2>/dev/null || true
+        done
     else
         i8kfan - 1 > /dev/null 2>&1 || true
     fi
@@ -266,8 +293,8 @@ probe_restore() {
 cmd_probe() {
     gather
     [ -n "$HW" ] || die "no dell_smm hwmon device - nothing to probe"
-    if [ -z "$PWM" ] && [ -z "$I8KFAN" ]; then
-        die "no pwm1 and no i8kfan - nothing can set the fan"
+    if [ -z "${PWMS[*]}" ] && [ -z "$I8KFAN" ]; then
+        die "no pwm files and no i8kfan - nothing can set the fan"
     fi
     echo "this briefly stops any fan daemon and writes to the fan controls."
     echo "everything is restored afterwards. the fan gets loud for a few seconds."
@@ -350,19 +377,37 @@ fancontrol_hwmon_ok() {
     grep -q "DEVNAME=${HW##*/}=dell_smm" /etc/fancontrol
 }
 
+# the pwm files /etc/fancontrol has no entry for
+fancontrol_missing() {
+    local p out=""
+    [ -f /etc/fancontrol ] || return 0
+    for p in "${PWMS[@]}"; do
+        grep -q -E "^FCTEMPS=(.* )?${HW##*/}/${p##*/}=" /etc/fancontrol || out="$out ${p##*/}"
+    done
+    echo "${out# }"
+}
+
 write_fancontrol_config() {
-    local hw=${HW##*/}
+    local hw=${HW##*/} p temps="" fans="" maxt="" mint="" start="" stop=""
+    for p in "${PWMS[@]}"; do
+        temps="$temps $hw/${p##*/}=$hw/temp1_input"
+        fans="$fans $hw/${p##*/}=$hw/fan${p##*pwm}_input"
+        maxt="$maxt $hw/${p##*/}=$HIGH"
+        mint="$mint $hw/${p##*/}=$LOW"
+        start="$start $hw/${p##*/}=150"
+        stop="$stop $hw/${p##*/}=0"
+    done
     cat > /etc/fancontrol <<EOF
 # written by dellfan, same shape as pwmconfig output
 INTERVAL=1
 DEVPATH=$hw=devices/platform/dell_smm_hwmon
 DEVNAME=$hw=dell_smm
-FCTEMPS=$hw/pwm1=$hw/temp1_input
-FCFANS=$hw/pwm1=$hw/fan1_input
-MAXTEMP=$hw/pwm1=$HIGH
-MINTEMP=$hw/pwm1=$LOW
-MINSTART=$hw/pwm1=150
-MINSTOP=$hw/pwm1=0
+FCTEMPS=${temps# }
+FCFANS=${fans# }
+MAXTEMP=${maxt# }
+MINTEMP=${mint# }
+MINSTART=${start# }
+MINSTOP=${stop# }
 EOF
     echo "wrote /etc/fancontrol"
 }
@@ -413,10 +458,12 @@ offer_aliases() {
 }
 
 install_fancontrol() {
-    [ -n "$PWM" ] || die "no pwm1 - this track needs the pwm interface"
+    local missing
+    [ -n "${PWMS[*]}" ] || die "no pwm files - this track needs the pwm interface"
     ensure_pkgs fancontrol lm-sensors
+    missing=$(fancontrol_missing)
     if [ ! -f /etc/fancontrol ]; then
-        if confirm "no /etc/fancontrol - write a basic one (ramp 40-50 C on the dell_smm fan)?"; then
+        if confirm "no /etc/fancontrol - write a basic one (ramp 40-50 C on every dell_smm fan)?"; then
             write_fancontrol_config
         else
             die "run pwmconfig once first, then rerun install"
@@ -426,6 +473,12 @@ install_fancontrol() {
             write_fancontrol_config
         else
             die "fix /etc/fancontrol by hand or rerun pwmconfig first"
+        fi
+    elif [ -n "$missing" ]; then
+        if confirm "/etc/fancontrol leaves out $missing - rewrite it for every fan (custom tuning is lost)?"; then
+            write_fancontrol_config
+        else
+            echo "kept /etc/fancontrol - nothing drives $missing"
         fi
     fi
     write_temps_conf
@@ -444,10 +497,10 @@ install_fancontrol() {
 PrivateDevices=no
 CapabilityBoundingSet=CAP_SYS_RAWIO
 ExecStartPre=$HELPER_BIN 0
-# failsafe: anything that stops fancontrol leaves the fan at max, not at a leftover level
-ExecStopPost=/bin/sh -c 'for d in /sys/class/hwmon/hwmon*; do [ "\$\$(cat \$\$d/name)" = dell_smm ] && echo 255 > \$\$d/pwm1; done; exit 0'
+# failsafe: anything that stops fancontrol leaves the fans at max, not at a leftover level
+ExecStopPost=/bin/sh -c 'for d in /sys/class/hwmon/hwmon*; do [ "\$\$(cat \$\$d/name)" = dell_smm ] || continue; for p in \$\$d/pwm[1-4]; do [ -e \$\$p ] && echo 255 > \$\$p; done; done; exit 0'
 EOF
-        echo "drop-in written: BIOS control off while fancontrol runs, max fan when it stops"
+        echo "drop-in written: BIOS control off while fancontrol runs, max fans when it stops"
     else
         rm -f "$FC_DROPIN"
     fi
@@ -553,8 +606,8 @@ ask_temps() {
 # a plain daemon stop only restores whatever values it saved at start.
 cmd_max() {
     gather
-    if [ -z "$PWM" ] && [ -z "$I8KFAN" ]; then
-        die "no pwm1 and no i8kfan - cannot set the fan"
+    if [ -z "${PWMS[*]}" ] && [ -z "$I8KFAN" ]; then
+        die "no pwm files and no i8kfan - cannot set the fan"
     fi
     if [ "$FC" = active ]; then systemctl stop fancontrol; fi
     if [ "$TC" = active ]; then systemctl stop tempcontrol; fi
@@ -580,8 +633,8 @@ cmd_auto() {
         systemctl start tempcontrol
         echo "tempcontrol running"
     else
-        if [ -z "$PWM" ] && [ -z "$I8KFAN" ]; then
-            die "no pwm1 and no i8kfan - cannot set the fan"
+        if [ -z "${PWMS[*]}" ] && [ -z "$I8KFAN" ]; then
+            die "no pwm files and no i8kfan - cannot set the fan"
         fi
         if [ -x "$HELPER_BIN" ]; then
             "$HELPER_BIN" 1 > /dev/null
@@ -641,10 +694,12 @@ cmd_status() {
     [ -f /etc/modprobe.d/dellfan.conf ] && echo "module conf: /etc/modprobe.d/dellfan.conf"
     echo "services:    fancontrol=$FC tempcontrol=$TC i8kmon=$I8KMON"
     if [ -n "$HW" ]; then
-        local p e
-        p=$(cat "$PWM" 2>/dev/null || echo '-')
-        e=$(cat "$PWM_ENABLE" 2>/dev/null || echo '-')
-        echo "fan:         $(rpm_now || echo '?') rpm, pwm=$p, enable=$e"
+        local p
+        [ -n "${PWMS[*]}" ] || echo "fan:         $(rpm_now || echo '?') rpm"
+        for p in "${PWMS[@]}"; do
+            echo "fan:         $(fan_line "$p")"
+        done
+        echo "pwm1_enable: $(cat "$PWM_ENABLE" 2>/dev/null || echo '-')"
     fi
     return 0
 }
