@@ -387,15 +387,17 @@ fancontrol_missing() {
     echo "${out# }"
 }
 
+# 128 is the lowest running step - some BIOSes take a stopped fan for a dead one
 write_fancontrol_config() {
-    local hw=${HW##*/} p temps="" fans="" maxt="" mint="" start="" stop=""
+    local hw=${HW##*/} p temps="" fans="" maxt="" mint="" start="" stop="" minpwm=""
     for p in "${PWMS[@]}"; do
         temps="$temps $hw/${p##*/}=$hw/temp1_input"
         fans="$fans $hw/${p##*/}=$hw/fan${p##*pwm}_input"
         maxt="$maxt $hw/${p##*/}=$HIGH"
         mint="$mint $hw/${p##*/}=$LOW"
         start="$start $hw/${p##*/}=150"
-        stop="$stop $hw/${p##*/}=0"
+        stop="$stop $hw/${p##*/}=128"
+        minpwm="$minpwm $hw/${p##*/}=128"
     done
     cat > /etc/fancontrol <<EOF
 # written by dellfan, same shape as pwmconfig output
@@ -408,6 +410,7 @@ MAXTEMP=${maxt# }
 MINTEMP=${mint# }
 MINSTART=${start# }
 MINSTOP=${stop# }
+MINPWM=${minpwm# }
 EOF
     echo "wrote /etc/fancontrol"
 }
